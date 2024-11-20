@@ -26,20 +26,30 @@
                 position: relative;
                 width: 100%;
                 height: 100%;
+                overflow: hidden;
+            }
+            .tab#display-tab.display img {
+                transform: scaleX(-1);
             }
             .tab#display-tab.display .info {
                 position: absolute;
                 top: 0;
                 left: 0;
                 right: 0;
-                background-color: #000000;
+                text-shadow:
+                    -0.5px 0.5px 0 #000,
+                    0.5px 0.5px 0 #000,
+                    0.5px -0.5px 0 #000,
+                    -0.5px -0.5px 0 #000;
+                font-weight: 600;
                 color: #FFFFFF;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 list-style-type: none;
-                padding: 5px;
+                padding: calc(15px/2);
                 font-size: 15px;
+                font-family: monospace;
             }
             .tab#display-tab.display .info li {
                 width: 50%;
@@ -103,56 +113,75 @@
                 }
             }
         }
+        document.body.onclick = function() {
+            if (document.fullscreenElement) {
+                document.exitFullscreen()
+            } else {
+                document.getElementsByClassName("display")[0].requestFullscreen()
+            }
+        }
+        isStarted = false
         window.addEventListener("load", () => {
-            window.addEventListener("hashchange", (event) => {
-                event.hash = JSON.parse(atob(window.location.hash.split("#")[1]))
-            })
-            socket = io("ws://192.168.0.107:5000")
-            socket.on("connect", () => {
-                display = [{
-                    info: document.getElementsByClassName("display")[0].getElementsByClassName("info")[0],
-                    image: document.getElementsByClassName("display")[0].getElementsByTagName("img")[0]
-                }, document.getElementsByClassName("display")[0]]
-                frames = [0, 0, Date.now()]
-                video = document.getElementById("video")
-                canvas = document.getElementById("canvas")
-                context = canvas.getContext("2d")
-                timestamp = null
-                navigator.mediaDevices.getUserMedia({ video: {
-                    facingMode: { exact: "user" },
-                    frameRate: { ideal: (2 ** 2) },
-                    width: { ideal: window.innerWidth },
-                    height: { ideal: window.innerHeight }
-                }}).then((stream) => {
-                    video.srcObject = stream
-                    video.onloadedmetadata = function() {
-                        video.play()
-                        setInterval(function(){
-                            canvas.width = video.videoWidth
-                            canvas.height = video.videoHeight
-                            timestamp = Date.now()
-                            context.drawImage(video, 0, 0, canvas.width, canvas.height)
-                            socket.emit("image", JSON.stringify({
-                                id: Date.now(),
-                                data: canvas.toDataURL("image/jpeg")
-                            }))
-                        }, Math.round(1000/stream.getVideoTracks()[0].getSettings().frameRate))
-                        selectTab("display")
-                    }
-                })
-                socket.on("image", (data) => {
-                    data = JSON.parse(data)
-                    if ((Date.now() - frames[2]) > 1000) {
-                        frames = [0, frames[0], Date.now()]
-                    } else {
-                        display[0].info.innerHTML = `<li style="text-align: left">${Date.now() - data.id}ms</li><li style="text-align: right">${frames[1]}fps</li>`
-                        display[0].image.src = data.data
-                        frames[0] += 1
-                    }
-                })
-                socket.on("disconnect", () => {
-                    window.location.reload()
-                })
+            document.addEventListener('fullscreenchange', () => {
+                if (document.fullscreenElement && !isStarted) {
+                    socket = io()
+                    frames = [0, 0, Date.now(), 0]
+                    socket.on("connect", () => {
+                        display = [{
+                            info: document.getElementsByClassName("display")[0].getElementsByClassName("info")[0],
+                            image: document.getElementsByClassName("display")[0].getElementsByTagName("img")[0]
+                        }, document.getElementsByClassName("display")[0]]
+                        ids = []
+                        video = document.getElementById("video")
+                        canvas = document.getElementById("canvas")
+                        context = canvas.getContext("2d")
+                        timestamp = null
+                        navigator.mediaDevices.getUserMedia({ video: {
+                            facingMode: { exact: "user" },
+                            frameRate: { ideal: (2 ** 3) },
+                            width: { ideal: window.innerHeight },
+                            height: { ideal: window.innerWidth }
+                        }}).then((stream) => {
+                            video.srcObject = stream
+                            video.onloadedmetadata = function() {
+                                video.play()
+                                setInterval(function(){
+                                    if (ids.length < (2 ** 3)) {
+                                        canvas.width = video.videoWidth
+                                        canvas.height = video.videoHeight
+                                        id = Date.now()
+                                        timestamp = Date.now()
+                                        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+                                        ids.push(id)
+                                        socket.emit("image", JSON.stringify({
+                                            id: id,
+                                            data: canvas.toDataURL("image/jpeg")
+                                        }))
+                                    }
+                                }, Math.round(1000/stream.getVideoTracks()[0].getSettings().frameRate))
+                                isStarted = true
+                            }
+                        })
+                        socket.on("image", (data) => {
+                            data = JSON.parse(data)
+                            if ((Date.now() - frames[2]) > 1000) frames = [0, frames[0], Date.now()]
+                            if (ids.includes(data.id)) {
+                                frames[0] += 1
+                                ids.splice(ids.indexOf(data.id), 1)
+                                if (ids.length > (2 ** 3)/2) {
+                                    selectTab("splash")
+                                } else {
+                                    display[0].info.innerHTML = `<li style="text-align: left">${Date.now() - data.id}ms</li><li style="text-align: right">${ids.length} ${(2 ** 3)/2} ${frames[1]}fps</li>`
+                                    display[0].image.src = data.data
+                                    selectTab("display")
+                                }
+                            }
+                        })
+                        socket.on("disconnect", () => {
+                            window.location.reload()
+                        })
+                    })
+                }
             })
             selectTab("splash")
         })
