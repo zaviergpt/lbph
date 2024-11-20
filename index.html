@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title></title>
+        <style>
+            * {
+                border: 0;
+                padding: 0;
+                margin: 0;
+                outline: none;
+                user-select: none;
+            }
+            #video, #canvas { display: none }
+            body {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #000000;
+            }
+            .tab {
+                display: none;
+            }
+            .tab#display-tab.display {
+                position: relative;
+                width: 100%;
+                height: 100%;
+            }
+            .tab#display-tab.display .info {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                background-color: #000000;
+                color: #FFFFFF;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                list-style-type: none;
+                padding: 5px;
+                font-size: 15px;
+            }
+            .tab#display-tab.display .info li {
+                width: 50%;
+            }
+            .tab#splash-tab {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%)
+            }
+            .tab#splash-tab .loader {
+                width: 50px;
+                aspect-ratio: 1;
+                border-radius: 50%;
+                border: calc((50px/2)/4) solid #FFFFFF;
+                animation:
+                    l20-1 0.8s infinite linear alternate,
+                    l20-2 1.6s infinite linear;
+            }
+            @keyframes l20-1 {
+                0%    {clip-path: polygon(50% 50%,0       0,  50%   0%,  50%    0%, 50%    0%, 50%    0%, 50%    0% )}
+                12.5% {clip-path: polygon(50% 50%,0       0,  50%   0%,  100%   0%, 100%   0%, 100%   0%, 100%   0% )}
+                25%   {clip-path: polygon(50% 50%,0       0,  50%   0%,  100%   0%, 100% 100%, 100% 100%, 100% 100% )}
+                50%   {clip-path: polygon(50% 50%,0       0,  50%   0%,  100%   0%, 100% 100%, 50%  100%, 0%   100% )}
+                62.5% {clip-path: polygon(50% 50%,100%    0, 100%   0%,  100%   0%, 100% 100%, 50%  100%, 0%   100% )}
+                75%   {clip-path: polygon(50% 50%,100% 100%, 100% 100%,  100% 100%, 100% 100%, 50%  100%, 0%   100% )}
+                100%  {clip-path: polygon(50% 50%,50%  100%,  50% 100%,   50% 100%,  50% 100%, 50%  100%, 0%   100% )}
+            }
+            @keyframes l20-2{ 
+                0%    {transform:scaleY(1)  rotate(0deg)}
+                49.99%{transform:scaleY(1)  rotate(135deg)}
+                50%   {transform:scaleY(-1) rotate(0deg)}
+                100%  {transform:scaleY(-1) rotate(-135deg)}
+            }
+        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    </head>
+    <body>
+        <div class="tab" id="splash-tab">
+            <div class="loader"></div>
+        </div>
+        <div class="tab display" id="display-tab">
+            <img>
+            <ul class="info"></ul>
+            <video id="video"></video>
+            <canvas id="canvas"></canvas>
+        </div>
+    </body>
+    <script>
+        function selectTab(id) {
+            tabs = document.getElementsByClassName("tab")
+            for (var tab in tabs) {
+                tab = tabs[tab]
+                if (tab.className && tab.className.split(" ")[0] === "tab") {
+                    if (tab.id.split("-")[0] === id) {
+                        tab.style.display = "block"
+                    } else {
+                        tab.style.display = "none"
+                    }
+                }
+            }
+        }
+        window.addEventListener("load", () => {
+            window.addEventListener("hashchange", (event) => {
+                event.hash = JSON.parse(atob(window.location.hash.split("#")[1]))
+            })
+            socket = io("ws://192.168.0.107:5000")
+            socket.on("connect", () => {
+                display = [{
+                    info: document.getElementsByClassName("display")[0].getElementsByClassName("info")[0],
+                    image: document.getElementsByClassName("display")[0].getElementsByTagName("img")[0]
+                }, document.getElementsByClassName("display")[0]]
+                frames = [0, 0, Date.now()]
+                video = document.getElementById("video")
+                canvas = document.getElementById("canvas")
+                context = canvas.getContext("2d")
+                timestamp = null
+                navigator.mediaDevices.getUserMedia({ video: {
+                    facingMode: { exact: "user" },
+                    frameRate: { ideal: (2 ** 2) },
+                    width: { ideal: window.innerWidth },
+                    height: { ideal: window.innerHeight }
+                }}).then((stream) => {
+                    video.srcObject = stream
+                    video.onloadedmetadata = function() {
+                        video.play()
+                        setInterval(function(){
+                            canvas.width = video.videoWidth
+                            canvas.height = video.videoHeight
+                            timestamp = Date.now()
+                            context.drawImage(video, 0, 0, canvas.width, canvas.height)
+                            socket.emit("image", JSON.stringify({
+                                id: Date.now(),
+                                data: canvas.toDataURL("image/jpeg")
+                            }))
+                        }, Math.round(1000/stream.getVideoTracks()[0].getSettings().frameRate))
+                        selectTab("display")
+                    }
+                })
+                socket.on("image", (data) => {
+                    data = JSON.parse(data)
+                    if ((Date.now() - frames[2]) > 1000) {
+                        frames = [0, frames[0], Date.now()]
+                    } else {
+                        display[0].info.innerHTML = `<li style="text-align: left">${Date.now() - data.id}ms</li><li style="text-align: right">${frames[1]}fps</li>`
+                        display[0].image.src = data.data
+                        frames[0] += 1
+                    }
+                })
+                socket.on("disconnect", () => {
+                    window.location.reload()
+                })
+            })
+            selectTab("splash")
+        })
+    </script>
+</html>
